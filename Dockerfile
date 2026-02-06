@@ -1,16 +1,22 @@
 FROM moodlehq/moodle-php-apache:8.2-bullseye
 
-# Script que fuerza 1 solo MPM justo antes de arrancar Apache
+# Crea un entrypoint propio que fuerza 1 solo MPM y luego llama al entrypoint original
 RUN set -eux; \
-  cat > /usr/local/bin/railway-start.sh <<'EOF' ; \
+  cat > /usr/local/bin/railway-entrypoint.sh <<'EOF' ; \
 #!/usr/bin/env bash
 set -e
 
-# Forzar 1 solo MPM: prefork (recomendado con mod_php)
+# Fuerza un solo MPM (prefork)
 a2dismod mpm_event mpm_worker 2>/dev/null || true
 a2enmod mpm_prefork 2>/dev/null || true
 
-# Arranque estándar de la imagen (respeta su entrypoint)
-exec apache2-foreground
+# Llama al entrypoint original de la imagen (PHP) con el comando original
+exec /usr/local/bin/docker-php-entrypoint "$@"
 EOF
-  chmod +x /usr/local/bin/railway-start.sh
+  chmod +x /usr/local/bin/railway-entrypoint.sh
+
+# Sobrescribe ENTRYPOINT para garantizar que SIEMPRE corra primero
+ENTRYPOINT ["/usr/local/bin/railway-entrypoint.sh"]
+
+# Mantén el CMD original (apache2-foreground)
+CMD ["apache2-foreground"]
