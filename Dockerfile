@@ -1,22 +1,34 @@
 FROM moodlehq/moodle-php-apache:8.2-bullseye
 
-# Crea un entrypoint propio que fuerza 1 solo MPM y luego llama al entrypoint original
+# Entrypoint propio: corre DESPUÉS de los scripts y asegura 1 solo MPM
 RUN set -eux; \
   cat > /usr/local/bin/railway-entrypoint.sh <<'EOF' ; \
 #!/usr/bin/env bash
 set -e
 
-# Fuerza un solo MPM (prefork)
-a2dismod mpm_event mpm_worker 2>/dev/null || true
-a2enmod mpm_prefork 2>/dev/null || true
+# 1) Corre los scripts estándar (los que ya ves en logs)
+if [ -d /docker-entrypoint.d ]; then
+  for f in /docker-entrypoint.d/*; do
+    case "$f" in
+      *.sh)
+        if [ -x "$f" ]; then
+          "$f"
+        else
+          . "$f"
+        fi
+        ;;
+    esac
+  done
+fi
 
-# Llama al entrypoint original de la imagen (PHP) con el comando original
-exec /usr/local/bin/docker-php-entrypoint "$@"
+# 2) BLINDAJE: deja SOLO prefork en mods-enabled (elimina cualquier otro MPM)
+rm -f /etc/apache2/mods-enabled/mpm_*.load /etc/apache2/mods-enabled/mpm_*.conf || true
+ln -sf /etc/apache2/mods-available/mpm_prefork.load /etc/apache2/mods-enabled/mpm_prefork.load
+ln -sf /etc/apache2/mods-available/mpm_prefork.conf /etc/apache2/mods-enabled/mpm_prefork.conf
+
+# 3) Arranca Apache en foreground
+exec apache2-foreground
 EOF
   chmod +x /usr/local/bin/railway-entrypoint.sh
 
-# Sobrescribe ENTRYPOINT para garantizar que SIEMPRE corra primero
 ENTRYPOINT ["/usr/local/bin/railway-entrypoint.sh"]
-
-# Mantén el CMD original (apache2-foreground)
-CMD ["apache2-foreground"]
